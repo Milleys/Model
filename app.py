@@ -3,9 +3,9 @@ import pandas as pd
 import pickle
 import os
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error, mean_absolute_percentage_error, explained_variance_score
 from xgboost import XGBRegressor
 
 import numpy as np
@@ -14,9 +14,9 @@ import warnings
 app = Flask(__name__)
 
 # Load the scaler and XGBoost model
-with open('xgb_scaler.pkl', 'rb') as file:
+with open('tuned_xgb_scaler.pkl', 'rb') as file:
     scaler = pickle.load(file)
-with open('xgb_model.pkl', 'rb') as file:
+with open('tuned_xgb_model.pkl', 'rb') as file:
     xgb_model = pickle.load(file)
 
 # Define the path to your CSV file
@@ -194,29 +194,56 @@ def retrain_model():
         # Select features and target
         features = ['Temperature', 'Humidity', 'Wind Speed', 'pH (units)', 'Ammonia (mg/L)', 'Inorganic Phosphate (mg/L)', 'BOD (mg/l)', 'Total coliforms (MPN/100ml)']
         target = 'Phytoplankton (cells/ml)'
-    
-        # Perform train/test split
+            
+        # Split data into features (X) and target (y)
         X = merged_df[features]
         y = merged_df[target]
+        
+        # Split data into training and testing sets
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
+        
         # Standardize the features
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
-    
-        # Train XGBoost model
+        
+        # Define the parameter grid for tuning
+        param_grid = {
+            'n_estimators': [100, 200, 500],
+            'learning_rate': [0.01, 0.1, 0.2],
+            'max_depth': [3, 5, 7],
+            'subsample': [0.7, 0.8, 1.0],
+            'colsample_bytree': [0.7, 0.8, 1.0],
+            'alpha': [0, 0.1, 0.5],  # L1 regularization
+            'lambda': [1, 1.5, 2]    # L2 regularization
+        }
+        
+        # Initialize the XGBoost model
         xgb_model = XGBRegressor()
-        xgb_model.fit(X_train_scaled, y_train)
-        y_pred_xgb = xgb_model.predict(X_test_scaled)
-    
-        # Calculate metrics
-        mse_xgb = mean_squared_error(y_test, y_pred_xgb)
-        mae_xgb = mean_absolute_error(y_test, y_pred_xgb)
-        r2_xgb = r2_score(y_test, y_pred_xgb)
-    
+        
+        # Perform Grid Search Cross-Validation to find the best hyperparameters
+        grid_search = GridSearchCV(estimator=xgb_model, param_grid=param_grid, cv=3, scoring='neg_mean_squared_error', verbose=1, n_jobs=-1)
+        grid_search.fit(X_train_scaled, y_train)
+        
+        # Get the best model after hyperparameter tuning
+        best_xgb = grid_search.best_estimator_
+        
+        # Fit the best model on the training data
+        best_xgb.fit(X_train_scaled, y_train)
+        
+        # Make predictions with the tuned model
+        y_pred_xgb_tuned = best_xgb.predict(X_test_scaled)
+        
+        # Calculate evaluation metrics
+        mse_xgb_tuned = mean_squared_error(y_test, y_pred_xgb_tuned)
+        rmse_xgb_tuned = mean_squared_error(y_test, y_pred_xgb_tuned, squared=False)  # RMSE
+        mae_xgb_tuned = mean_absolute_error(y_test, y_pred_xgb_tuned)
+        mape_xgb_tuned = mean_absolute_percentage_error(y_test, y_pred_xgb_tuned)  # MAPE
+        r2_xgb_tuned = r2_score(y_test, y_pred_xgb_tuned)
+        explained_variance = explained_variance_score(y_test, y_pred_xgb_tuned)  # Explained Variance Score
+        
         # Return the metrics to the PHP website
-        return jsonify({'mse': mse_xgb, 'mae': mae_xgb, 'r2': r2_xgb})
+        return jsonify({'mse': mse_xgb_tuned, 'mae': mae_xgb_tuned, 'r2': r2_xgb_tuned})
     
     except Exception as e:
         return jsonify({"error": str(e)})   
@@ -244,28 +271,56 @@ def export_model():
         features = ['Temperature', 'Humidity', 'Wind Speed', 'pH (units)', 'Ammonia (mg/L)', 'Inorganic Phosphate (mg/L)', 'BOD (mg/l)', 'Total coliforms (MPN/100ml)']
         target = 'Phytoplankton (cells/ml)'
     
-        # Perform train/test split
+            
+        # Split data into features (X) and target (y)
         X = merged_df[features]
         y = merged_df[target]
+        
+        # Split data into training and testing sets
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
+        
         # Standardize the features
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
-    
-        # Train XGBoost model
+        
+        # Define the parameter grid for tuning
+        param_grid = {
+            'n_estimators': [100, 200, 500],
+            'learning_rate': [0.01, 0.1, 0.2],
+            'max_depth': [3, 5, 7],
+            'subsample': [0.7, 0.8, 1.0],
+            'colsample_bytree': [0.7, 0.8, 1.0],
+            'alpha': [0, 0.1, 0.5],  # L1 regularization
+            'lambda': [1, 1.5, 2]    # L2 regularization
+        }
+        
+        # Initialize the XGBoost model
         xgb_model = XGBRegressor()
-        xgb_model.fit(X_train_scaled, y_train)
-        y_pred_xgb = xgb_model.predict(X_test_scaled)
-    
-        # Calculate metrics
-        mse_xgb = mean_squared_error(y_test, y_pred_xgb)
-        mae_xgb = mean_absolute_error(y_test, y_pred_xgb)
-        r2_xgb = r2_score(y_test, y_pred_xgb)
+        
+        # Perform Grid Search Cross-Validation to find the best hyperparameters
+        grid_search = GridSearchCV(estimator=xgb_model, param_grid=param_grid, cv=3, scoring='neg_mean_squared_error', verbose=1, n_jobs=-1)
+        grid_search.fit(X_train_scaled, y_train)
+        
+        # Get the best model after hyperparameter tuning
+        best_xgb = grid_search.best_estimator_
+        
+        # Fit the best model on the training data
+        best_xgb.fit(X_train_scaled, y_train)
+        
+        # Make predictions with the tuned model
+        y_pred_xgb_tuned = best_xgb.predict(X_test_scaled)
+        
+        # Calculate evaluation metrics
+        mse_xgb_tuned = mean_squared_error(y_test, y_pred_xgb_tuned)
+        rmse_xgb_tuned = mean_squared_error(y_test, y_pred_xgb_tuned, squared=False)  # RMSE
+        mae_xgb_tuned = mean_absolute_error(y_test, y_pred_xgb_tuned)
+        mape_xgb_tuned = mean_absolute_percentage_error(y_test, y_pred_xgb_tuned)  # MAPE
+        r2_xgb_tuned = r2_score(y_test, y_pred_xgb_tuned)
+        explained_variance = explained_variance_score(y_test, y_pred_xgb_tuned)  # Explained Variance Score
         # Save the trained model to a file using pickle
         with open('xgb_model2.pkl', 'wb') as file:
-            pickle.dump(xgb_model, file)
+            pickle.dump(best_xgb, file)
         
         print("Model saved to 'xgb_model2.pkl'")
 
